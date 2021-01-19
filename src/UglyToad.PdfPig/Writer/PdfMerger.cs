@@ -205,7 +205,9 @@
 
             private const int ARTIFICIAL_NODE_LIMIT = 100;
 
-            private readonly PdfStreamWriter context;
+
+            private readonly PdfDedupStreamWriter context = new PdfDedupStreamWriter();
+
             private readonly List<IndirectReferenceToken> pagesTokenReferences = new List<IndirectReferenceToken>();
             private readonly IndirectReferenceToken rootPagesReference;
 
@@ -214,7 +216,7 @@
 
             public DocumentMerger(Stream baseStream)
             {
-                context = new PdfStreamWriter(baseStream, false);
+                //context = new PdfStreamWriter(baseStream, false);
                 rootPagesReference = context.ReserveNumberToken();
             }
 
@@ -287,7 +289,7 @@
                         {
                             foreach (var pair in resourcesDictionary.Data)
                             {
-                                resources.Add(pair.Key, CopyToken(pair.Value, tokenScanner, referencesFromDocument));
+                                resources.Add(pair.Key, CopyToken(pair.Value, tokenScanner, referencesFromDocument, new()));
                             }
                         }
 
@@ -407,7 +409,7 @@
                         continue;
                     }
 
-                    pageDictionary.Add(NameToken.Create(name), CopyToken(token, tokenScanner, referencesFromDocument));
+                    pageDictionary.Add(NameToken.Create(name), CopyToken(token, tokenScanner, referencesFromDocument, new ()));
                 }
 
                 return context.WriteToken(new DictionaryToken(pageDictionary));
@@ -420,20 +422,21 @@
             /// <param name="tokenToCopy">Token to inspect for reference</param>
             /// <param name="tokenScanner">scanner get the content from the original document</param>
             /// <param name="referencesFromDocument">Map of previously copied</param>
+            /// /// <param name="callstack">Map of currently being copied indirect objects</param>
             /// <returns>A reference of the token that was copied. With all the reference updated</returns>
-            private IToken CopyToken(IToken tokenToCopy, IPdfTokenScanner tokenScanner, IDictionary<IndirectReference, IndirectReferenceToken> referencesFromDocument)
+            private IToken CopyToken(IToken tokenToCopy, IPdfTokenScanner tokenScanner, IDictionary<IndirectReference, IndirectReferenceToken> referencesFromDocument, Dictionary<IndirectReference, IndirectReferenceToken> callstack)
             {
                 // This token need to be deep copied, because they could contain reference. So we have to update them.
                 switch (tokenToCopy)
                 {
                     case DictionaryToken dictionaryToken:
-                        {
+                    {
                             var newContent = new Dictionary<NameToken, IToken>();
                             foreach (var setPair in dictionaryToken.Data)
                             {
                                 var name = setPair.Key;
                                 var token = setPair.Value;
-                                newContent.Add(NameToken.Create(name), CopyToken(token, tokenScanner, referencesFromDocument));
+                                newContent.Add(NameToken.Create(name), CopyToken(token, tokenScanner, referencesFromDocument, callstack));
                             }
 
                             return new DictionaryToken(newContent);
@@ -443,7 +446,7 @@
                             var newArray = new List<IToken>(arrayToken.Length);
                             foreach (var token in arrayToken.Data)
                             {
-                                newArray.Add(CopyToken(token, tokenScanner, referencesFromDocument));
+                                newArray.Add(CopyToken(token, tokenScanner, referencesFromDocument, callstack));
                             }
 
                             return new ArrayToken(newArray);
@@ -455,20 +458,38 @@
                                 return newReferenceToken;
                             }
 
-                            //we add the token to referencesFromDocument to prevent stackoverflow on references cycles 
-                            newReferenceToken = context.ReserveNumberToken();
-                            referencesFromDocument.Add(referenceToken.Data, newReferenceToken);
+                            if (callstack.ContainsKey(referenceToken.Data) && callstack[referenceToken.Data] == null)
+                            {
+                                newReferenceToken = context.ReserveNumberToken();
+                                callstack[referenceToken.Data] = newReferenceToken;
+                                referencesFromDocument.Add(referenceToken.Data, newReferenceToken);
+                                return newReferenceToken;
+                            }
 
+                            callstack.Add(referenceToken.Data, null);
+
+                            //we add the token to referencesFromDocument to prevent stackoverflow on references cycles 
+                            // newReferenceToken = context.ReserveNumberToken();
+                            // callstack.Add(newReferenceToken.Data.ObjectNumber);
+                            // referencesFromDocument.Add(referenceToken.Data, newReferenceToken);
+                            // 
                             var tokenObject = DirectObjectFinder.Get<IToken>(referenceToken.Data, tokenScanner);
                             Debug.Assert(!(tokenObject is IndirectReferenceToken));
+                            var result = CopyToken(tokenObject, tokenScanner, referencesFromDocument, callstack);
 
-                            var newToken = CopyToken(tokenObject, tokenScanner, referencesFromDocument);
-                            context.WriteToken(newReferenceToken, newToken);
+                            if (callstack[referenceToken.Data] != null)
+                            {
+                                
+                                return context.WriteToken(result, (int)callstack[referenceToken.Data].Data.ObjectNumber);
+                            }
+
+                            newReferenceToken = context.WriteToken(result);
+                            referencesFromDocument.Add(referenceToken.Data, newReferenceToken);
                             return newReferenceToken;
                         }
                     case StreamToken streamToken:
-                        {
-                            var properties = CopyToken(streamToken.StreamDictionary, tokenScanner, referencesFromDocument) as DictionaryToken;
+                    {
+                            var properties = CopyToken(streamToken.StreamDictionary, tokenScanner, referencesFromDocument, callstack) as DictionaryToken;
                             Debug.Assert(properties != null);
 
                             var bytes = streamToken.Data;

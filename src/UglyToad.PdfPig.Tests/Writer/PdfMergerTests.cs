@@ -118,6 +118,21 @@
         }
 
         [Fact]
+        public void DedupsObjectsFromDifferentDoc()
+        {
+            var one = IntegrationHelpers.GetDocumentPath("Multiple Page - from Mortality Statistics.pdf");
+
+            var result = PdfMerger.Merge(new List<byte[]> { File.ReadAllBytes(one), File.ReadAllBytes(one) }, new List<IReadOnlyList<int>> { new List<int> { 1 }, new List<int> { 1}  });
+
+            using (var document = PdfDocument.Open(result, ParsingOptions.LenientParsingOff))
+            {
+                Assert.Equal(2, document.NumberOfPages);
+                Assert.True(document.Structure.CrossReferenceTable.ObjectOffsets.Count <= 29,
+                    "Expected object count to be lower than 30"); // 45 objects with duplicates, 29 with correct re-use
+            }
+        }
+
+        [Fact]
         public void CanMergeWithObjectStream()
         {
             var first = IntegrationHelpers.GetDocumentPath("Single Page Simple - from google drive.pdf");

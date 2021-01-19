@@ -357,6 +357,32 @@
             WriteLineBreak(outputStream);
         }
 
+        /// <summary>
+        /// TODO cleanup
+        /// </summary>
+        /// <param name="objectNumber"></param>
+        /// <param name="generation"></param>
+        /// <param name="data"></param>
+        /// <param name="outputStream"></param>
+        public static void WriteObject(long objectNumber, int generation, byte[] data, Stream outputStream)
+        {
+            WriteLong(objectNumber, outputStream);
+            WriteWhitespace(outputStream);
+
+            WriteInt(generation, outputStream);
+            WriteWhitespace(outputStream);
+
+            outputStream.Write(ObjStart, 0, ObjStart.Length);
+            WriteLineBreak(outputStream);
+
+            outputStream.Write(data, 0, data.Length);
+
+            WriteLineBreak(outputStream);
+            outputStream.Write(ObjEnd, 0, ObjEnd.Length);
+
+            WriteLineBreak(outputStream);
+        }
+
         private static void WriteStream(StreamToken streamToken, Stream outputStream)
         {
             WriteDictionary(streamToken.StreamDictionary, outputStream);
